@@ -71,13 +71,13 @@ cd smart-ai-study-assistant
 2. Install dependencies:
 
 ```bash
-pnpm install
+npm install
 ```
 
 3. Run the development server:
 
 ```bash
-pnpm dev
+npm dev
 ```
 
 4. Open [http://localhost:3000](http://localhost:3000) in your browser.
@@ -122,7 +122,7 @@ To integrate with OpenAI or another provider:
 1. Install the AI SDK:
 
 ```bash
-pnpm add ai @ai-sdk/openai
+npm add ai @ai-sdk/openai
 ```
 
 2. Add your API key to `.env.local`:
