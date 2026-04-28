@@ -163,10 +163,10 @@ Edit the CSS variables in `app/globals.css` to customize the color scheme:
 
 | Command | Description |
 |---------|-------------|
-| `pnpm dev` | Start development server |
-| `pnpm build` | Build for production |
-| `pnpm start` | Start production server |
-| `pnpm lint` | Run ESLint |
+| `npm dev` | Start development server |
+| `npm build` | Build for production |
+| `npm start` | Start production server |
+| `npm lint` | Run ESLint |
 
 ## Contributing
 
