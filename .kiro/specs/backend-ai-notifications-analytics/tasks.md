@@ -66,14 +66,14 @@ The implementation follows a 10-phase roadmap with incremental validation checkp
     - Add cache integration hooks
     - _Requirements: 4.4, 2.4, 2.8_
 
-  - [~] 3.2 Create OpenAI provider implementation
+  - [x] 3.2 Create OpenAI provider implementation
     - Implement `OpenAIProvider` class in `frontend/lib/ai/openai-provider.ts`
     - Add summarization with JSON response format
     - Add quiz generation with question validation
     - Implement token counting approximation
     - _Requirements: 4.2, 2.1, 3.1_
 
-  - [~] 3.3 Create Anthropic provider implementation
+  - [-] 3.3 Create Anthropic provider implementation
     - Implement `AnthropicProvider` class in `frontend/lib/ai/anthropic-provider.ts`
     - Add summarization with JSON parsing
     - Add quiz generation with unique ID assignment

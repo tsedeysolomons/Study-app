@@ -24,3 +24,6 @@ export { AIErrorCodes } from "./types";
 
 // Export the AI service adapter
 export { AIServiceAdapter } from "./ai-service-adapter";
+
+// Export AI provider implementations
+export { OpenAIProvider } from "./openai-provider";

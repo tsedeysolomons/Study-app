@@ -9,6 +9,7 @@
  * - Response validation
  */
 
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { AIServiceAdapter } from "../ai-service-adapter";
 import { APIError } from "../../errors";
 import type {
@@ -197,8 +198,8 @@ describe("AIServiceAdapter", () => {
         },
       };
 
-      const checkFn = vi.fn().mockResolvedValue(cachedResult);
-      const storeFn = vi.fn();
+      const checkFn = jest.fn().mockResolvedValue(cachedResult);
+      const storeFn = jest.fn();
       adapter.setCacheIntegration(checkFn, storeFn);
 
       const text = "This is a longer text that should be summarized properly with enough content to pass validation.";
@@ -210,8 +211,8 @@ describe("AIServiceAdapter", () => {
     });
 
     it("should store result in cache after successful call", async () => {
-      const checkFn = vi.fn().mockResolvedValue(null);
-      const storeFn = vi.fn();
+      const checkFn = jest.fn().mockResolvedValue(null);
+      const storeFn = jest.fn();
       adapter.setCacheIntegration(checkFn, storeFn);
 
       const text = "This is a longer text that should be summarized properly with enough content to pass validation.";
@@ -226,8 +227,8 @@ describe("AIServiceAdapter", () => {
         cacheEnabled: false,
       });
 
-      const checkFn = vi.fn();
-      const storeFn = vi.fn();
+      const checkFn = jest.fn();
+      const storeFn = jest.fn();
       noCacheAdapter.setCacheIntegration(checkFn, storeFn);
 
       const text = "This is a longer text that should be summarized properly with enough content to pass validation.";
@@ -241,7 +242,7 @@ describe("AIServiceAdapter", () => {
   describe("Summarize - Response Validation", () => {
     it("should reject response without summary field", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.summarize = vi.fn().mockResolvedValue({
+      invalidProvider.summarize = jest.fn().mockResolvedValue({
         keyPoints: ["Point 1", "Point 2", "Point 3"],
         metadata: {},
       });
@@ -255,7 +256,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject response without keyPoints field", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.summarize = vi.fn().mockResolvedValue({
+      invalidProvider.summarize = jest.fn().mockResolvedValue({
         summary: "Test summary",
         metadata: {},
       });
@@ -269,7 +270,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject response with too few key points", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.summarize = vi.fn().mockResolvedValue({
+      invalidProvider.summarize = jest.fn().mockResolvedValue({
         summary: "Test summary",
         keyPoints: ["Point 1", "Point 2"],
         metadata: {},
@@ -284,7 +285,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject response with too many key points", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.summarize = vi.fn().mockResolvedValue({
+      invalidProvider.summarize = jest.fn().mockResolvedValue({
         summary: "Test summary",
         keyPoints: ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"],
         metadata: {},
@@ -333,7 +334,7 @@ describe("AIServiceAdapter", () => {
       const text = "This is a longer text with enough content to generate quiz questions. It has multiple sentences and concepts that can be tested.";
       const options = { questionCount: 4, difficulty: "medium" as const, temperature: 0.5 };
       
-      const generateQuizSpy = vi.spyOn(mockProvider, "generateQuiz");
+      const generateQuizSpy = jest.spyOn(mockProvider, "generateQuiz");
       await adapter.generateQuiz(text, options);
       
       expect(generateQuizSpy).toHaveBeenCalledWith(text, options);
@@ -343,7 +344,7 @@ describe("AIServiceAdapter", () => {
   describe("GenerateQuiz - Response Validation", () => {
     it("should reject response without questions field", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.generateQuiz = vi.fn().mockResolvedValue({
+      invalidProvider.generateQuiz = jest.fn().mockResolvedValue({
         metadata: {},
       });
 
@@ -356,7 +357,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject response with empty questions array", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.generateQuiz = vi.fn().mockResolvedValue({
+      invalidProvider.generateQuiz = jest.fn().mockResolvedValue({
         questions: [],
         metadata: {},
       });
@@ -370,7 +371,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject response with too few questions", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.generateQuiz = vi.fn().mockResolvedValue({
+      invalidProvider.generateQuiz = jest.fn().mockResolvedValue({
         questions: [
           {
             id: "1",
@@ -392,7 +393,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject question without id", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.generateQuiz = vi.fn().mockResolvedValue({
+      invalidProvider.generateQuiz = jest.fn().mockResolvedValue({
         questions: [
           {
             question: "Test?",
@@ -427,7 +428,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject question with wrong number of options", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.generateQuiz = vi.fn().mockResolvedValue({
+      invalidProvider.generateQuiz = jest.fn().mockResolvedValue({
         questions: [
           {
             id: "1",
@@ -463,7 +464,7 @@ describe("AIServiceAdapter", () => {
 
     it("should reject question with invalid correctAnswer", async () => {
       const invalidProvider = new MockAIProvider();
-      invalidProvider.generateQuiz = vi.fn().mockResolvedValue({
+      invalidProvider.generateQuiz = jest.fn().mockResolvedValue({
         questions: [
           {
             id: "1",
@@ -501,7 +502,7 @@ describe("AIServiceAdapter", () => {
   describe("Error Handling", () => {
     it("should handle rate limit errors", async () => {
       const errorProvider = new MockAIProvider();
-      errorProvider.summarize = vi.fn().mockRejectedValue({
+      errorProvider.summarize = jest.fn().mockRejectedValue({
         code: "rate_limit_exceeded",
         message: "Rate limit exceeded",
       });
@@ -515,7 +516,7 @@ describe("AIServiceAdapter", () => {
 
     it("should handle timeout errors", async () => {
       const errorProvider = new MockAIProvider();
-      errorProvider.summarize = vi.fn().mockRejectedValue({
+      errorProvider.summarize = jest.fn().mockRejectedValue({
         code: "timeout",
         message: "Request timed out",
       });
@@ -529,7 +530,7 @@ describe("AIServiceAdapter", () => {
 
     it("should handle generic AI service errors", async () => {
       const errorProvider = new MockAIProvider();
-      errorProvider.summarize = vi.fn().mockRejectedValue({
+      errorProvider.summarize = jest.fn().mockRejectedValue({
         message: "Unknown error",
       });
 
@@ -541,3 +542,4 @@ describe("AIServiceAdapter", () => {
     });
   });
 });
+
