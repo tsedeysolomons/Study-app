@@ -27,3 +27,4 @@ export { AIServiceAdapter } from "./ai-service-adapter";
 
 // Export AI provider implementations
 export { OpenAIProvider } from "./openai-provider";
+export { AnthropicProvider } from "./anthropic-provider";
