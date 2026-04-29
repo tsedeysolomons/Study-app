@@ -59,7 +59,7 @@ The implementation follows a 10-phase roadmap with incremental validation checkp
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 3. AI Service Integration
-  - [-] 3.1 Implement AI service adapter pattern
+  - [x] 3.1 Implement AI service adapter pattern
     - Create `AIProvider` interface in `frontend/lib/ai/types.ts`
     - Implement `AIServiceAdapter` class with provider abstraction
     - Add input validation and token counting
