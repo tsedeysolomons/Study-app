@@ -80,19 +80,19 @@ The implementation follows a 10-phase roadmap with incremental validation checkp
     - Implement token counting approximation
     - _Requirements: 4.2, 2.1, 3.1_
 
-  - [-] 3.4 Implement prompt templates
+  - [x] 3.4 Implement prompt templates
     - Create summarization prompt template with key points extraction
     - Create quiz generation prompt template with difficulty levels
     - Add template variable substitution logic
     - _Requirements: 2.7, 3.6_
 
-  - [~] 3.5 Add token management and budget enforcement
+  - [x] 3.5 Add token management and budget enforcement
     - Implement `TokenManager` class in `frontend/lib/ai/token-manager.ts`
     - Add token limit validation for requests
     - Track daily token usage with budget warnings
     - _Requirements: 6.3, 6.4, 6.5_
 
-  - [~] 3.6 Create AI API endpoints
+  - [x] 3.6 Create AI API endpoints
     - Implement `/api/v1/ai/summarize` POST endpoint
     - Implement `/api/v1/ai/generate-quiz` POST endpoint
     - Add request validation with Zod schemas
@@ -106,7 +106,7 @@ The implementation follows a 10-phase roadmap with incremental validation checkp
     - Test response validation and error handling
     - _Requirements: 2.5, 2.8, 3.5, 3.7, 3.8_
 
-- [~] 4. Checkpoint - Verify AI integration
+- [x] 4. Checkpoint - Verify AI integration
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 5. Caching and Rate Limiting

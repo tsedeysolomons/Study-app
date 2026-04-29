@@ -28,3 +28,21 @@ export { AIServiceAdapter } from "./ai-service-adapter";
 // Export AI provider implementations
 export { OpenAIProvider } from "./openai-provider";
 export { AnthropicProvider } from "./anthropic-provider";
+
+// Export prompt template functions
+export {
+  generateSummarizationPrompt,
+  generateQuizPrompt,
+  substituteVariables,
+  getSummarizationTemplate,
+  getQuizTemplate,
+} from "./prompt-templates";
+export type { TemplateVariables } from "./prompt-templates";
+
+// Export token manager
+export { TokenManager } from "./token-manager";
+export type {
+  TokenManagerConfig,
+  DailyUsage,
+  BudgetStatus,
+} from "./token-manager";
