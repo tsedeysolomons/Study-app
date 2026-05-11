@@ -1,75 +1,131 @@
-import { NextRequest, NextResponse } from "next/server";
-import type {
-  APIResponse,
-  CreateSessionRequest,
-  StudySession,
-  GetSessionsResponse,
-} from "@/lib/api-types";
-
 /**
- * Study Sessions Endpoint
- * POST /api/v1/sessions - Create a new study session
+ * Study Sessions API Endpoints
  * GET /api/v1/sessions - Retrieve study sessions
+ * POST /api/v1/sessions - Create a new study session
+ * 
+ * Requirements: 8.6
  */
 
-export async function POST(request: NextRequest) {
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
+import type { APIResponse } from '@/lib/api-types';
+import { handleAPIError } from '@/lib/errors';
+import { getStorageAdapter } from '@/lib/storage';
+
+// Validation schemas
+const CreateSessionSchema = z.object({
+  duration: z.number().int().positive(),
+  notes: z.string(),
+  startTime: z.string().datetime(),
+  endTime: z.string().datetime(),
+});
+
+const GetSessionsQuerySchema = z.object({
+  limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 50),
+  offset: z.string().optional().transform(val => val ? parseInt(val, 10) : 0),
+  startDate: z.string().datetime().optional(),
+  endDate: z.string().datetime().optional(),
+});
+
+/**
+ * GET /api/v1/sessions
+ * Retrieve study sessions with optional filtering and pagination
+ */
+export async function GET(request: NextRequest) {
   try {
-    const body: CreateSessionRequest = await request.json();
+    const { searchParams } = new URL(request.url);
+    const query = GetSessionsQuerySchema.parse({
+      limit: searchParams.get('limit'),
+      offset: searchParams.get('offset'),
+      startDate: searchParams.get('startDate'),
+      endDate: searchParams.get('endDate'),
+    });
 
-    // TODO: Implement session creation logic
-    // This is a placeholder response
-    const response: APIResponse<StudySession> = {
-      success: false,
-      error: {
-        code: "SERVICE_UNAVAILABLE",
-        message: "Session creation service not yet implemented",
-      },
-    };
+    // Validate limits
+    const limit = Math.min(query.limit, 100);
+    const offset = query.offset;
 
-    return NextResponse.json(response, { status: 503 });
-  } catch (error) {
+    // Get storage adapter
+    const storage = getStorageAdapter();
+
+    // Parse date filters
+    const startDate = query.startDate ? new Date(query.startDate) : undefined;
+    const endDate = query.endDate ? new Date(query.endDate) : undefined;
+
+    // Retrieve sessions
+    const allSessions = await storage.getSessions(undefined, startDate, endDate);
+    
+    // Apply pagination
+    const paginatedSessions = allSessions.slice(offset, offset + limit);
+    const hasMore = allSessions.length > offset + limit;
+
     const response: APIResponse = {
-      success: false,
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "An unexpected error occurred",
-        details: error instanceof Error ? error.message : "Unknown error",
+      success: true,
+      data: {
+        sessions: paginatedSessions,
+        pagination: {
+          total: allSessions.length,
+          limit,
+          offset,
+          hasMore,
+        },
       },
     };
 
-    return NextResponse.json(response, { status: 500 });
+    return NextResponse.json(response, { status: 200 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const response: APIResponse = {
+        success: false,
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Invalid query parameters',
+          details: error.errors,
+        },
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
+
+    const errorResponse = handleAPIError(error);
+    return NextResponse.json(errorResponse, { status: errorResponse.status });
   }
 }
 
-export async function GET(request: NextRequest) {
+/**
+ * POST /api/v1/sessions
+ * Create a new study session
+ */
+export async function POST(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const limit = parseInt(searchParams.get("limit") || "50");
-    const offset = parseInt(searchParams.get("offset") || "0");
-    const startDate = searchParams.get("startDate");
-    const endDate = searchParams.get("endDate");
+    const body = await request.json();
+    const validatedData = CreateSessionSchema.parse(body);
 
-    // TODO: Implement session retrieval logic
-    // This is a placeholder response
-    const response: APIResponse<GetSessionsResponse> = {
-      success: false,
-      error: {
-        code: "SERVICE_UNAVAILABLE",
-        message: "Session retrieval service not yet implemented",
-      },
-    };
+    // Get storage adapter
+    const storage = getStorageAdapter();
 
-    return NextResponse.json(response, { status: 503 });
-  } catch (error) {
+    // Save session
+    const session = await storage.saveSession(validatedData);
+
     const response: APIResponse = {
-      success: false,
-      error: {
-        code: "INTERNAL_ERROR",
-        message: "An unexpected error occurred",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
+      success: true,
+      data: session,
     };
 
-    return NextResponse.json(response, { status: 500 });
+    return NextResponse.json(response, { status: 201 });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const response: APIResponse = {
+        success: false,
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'Request validation failed',
+          details: error.errors,
+        },
+      };
+      return NextResponse.json(response, { status: 400 });
+    }
+
+    const errorResponse = handleAPIError(error);
+    return NextResponse.json(errorResponse, { status: errorResponse.status });
   }
 }

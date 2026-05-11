@@ -4,6 +4,7 @@ import type { APIResponse, SummarizeRequest, SummarizeResponse } from "@/lib/api
 import { handleAPIError } from "@/lib/errors";
 import { AIServiceAdapter, OpenAIProvider, AnthropicProvider } from "@/lib/ai";
 import { TokenManager } from "@/lib/ai/token-manager";
+import { CacheManager } from "@/lib/cache/cache-manager";
 import type { AIConfig } from "@/lib/ai/types";
 
 /**
@@ -27,7 +28,7 @@ const SummarizeRequestSchema = z.object({
 /**
  * Initialize AI service adapter with environment configuration
  */
-function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: TokenManager } {
+function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: TokenManager; cacheManager: CacheManager } {
   // Get configuration from environment variables
   const provider = process.env.AI_PROVIDER as "openai" | "anthropic" | undefined;
   const apiKey = process.env.AI_API_KEY;
@@ -69,7 +70,14 @@ function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: Token
       : undefined,
   });
 
-  return { adapter, tokenManager };
+  // Initialize cache manager
+  const cacheManager = new CacheManager({
+    enabled: process.env.CACHE_ENABLED !== "false",
+    ttl: parseInt(process.env.CACHE_TTL || "86400", 10), // 24 hours default
+    maxEntries: parseInt(process.env.CACHE_MAX_ENTRIES || "1000", 10),
+  });
+
+  return { adapter, tokenManager, cacheManager };
 }
 
 export async function POST(request: NextRequest) {
@@ -79,7 +87,29 @@ export async function POST(request: NextRequest) {
     const validatedData = SummarizeRequestSchema.parse(body);
 
     // Initialize AI service
-    const { adapter, tokenManager } = initializeAIService();
+    const { adapter, tokenManager, cacheManager } = initializeAIService();
+
+    // Generate cache key
+    const cacheKey = cacheManager.generateKey("summary", {
+      text: validatedData.text,
+      options: validatedData.options
+    });
+
+    // Check cache first
+    const cachedResult = await cacheManager.get<SummarizeResponse>(cacheKey);
+    if (cachedResult) {
+      const response: APIResponse<SummarizeResponse> = {
+        success: true,
+        data: {
+          ...cachedResult,
+          metadata: {
+            ...cachedResult.metadata,
+            cached: true
+          }
+        },
+      };
+      return NextResponse.json(response, { status: 200 });
+    }
 
     // Validate token budget
     tokenManager.validateRequest(validatedData.text, "summary");
@@ -93,10 +123,19 @@ export async function POST(request: NextRequest) {
       result.metadata.outputTokens
     );
 
+    // Store in cache
+    await cacheManager.set(cacheKey, result);
+
     // Return success response
     const response: APIResponse<SummarizeResponse> = {
       success: true,
-      data: result,
+      data: {
+        ...result,
+        metadata: {
+          ...result.metadata,
+          cached: false
+        }
+      },
     };
 
     return NextResponse.json(response, { status: 200 });

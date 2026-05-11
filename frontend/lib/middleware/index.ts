@@ -6,11 +6,13 @@
 export * from "./cors";
 export * from "./timeout";
 export * from "./logging";
+export * from "./rate-limit";
 
 import { NextRequest, NextResponse } from "next/server";
 import { withCORS, CORSOptions } from "./cors";
 import { withTimeout, TimeoutOptions } from "./timeout";
 import { withLogging } from "./logging";
+import { withRateLimit } from "./rate-limit";
 import { handleAPIError } from "@/lib/errors";
 
 /**
@@ -20,6 +22,7 @@ export interface MiddlewareOptions {
   cors?: CORSOptions | boolean;
   timeout?: TimeoutOptions | boolean;
   logging?: boolean;
+  rateLimit?: boolean;
 }
 
 /**
@@ -68,9 +71,62 @@ export async function withMiddleware(
     cors = true,
     timeout = true,
     logging = true,
+    rateLimit = true,
   } = options || {};
 
   try {
+    // Apply rate limiting first (if enabled)
+    if (rateLimit) {
+      return await withRateLimit(request, async () => {
+        // Apply logging middleware (if enabled)
+        if (logging) {
+          return await withLogging(request, async (requestId) => {
+            // Apply CORS middleware (if enabled)
+            const corsHandler = cors
+              ? () =>
+                  withCORS(
+                    request,
+                    handler,
+                    typeof cors === "object" ? cors : undefined
+                  )
+              : handler;
+
+            // Apply timeout middleware (if enabled)
+            if (timeout) {
+              return await withTimeout(
+                request,
+                corsHandler,
+                typeof timeout === "object" ? timeout : undefined
+              );
+            }
+
+            return await corsHandler();
+          });
+        }
+
+        // Without logging, apply CORS and timeout directly
+        const corsHandler = cors
+          ? () =>
+              withCORS(
+                request,
+                handler,
+                typeof cors === "object" ? cors : undefined
+              )
+          : handler;
+
+        if (timeout) {
+          return await withTimeout(
+            request,
+            corsHandler,
+            typeof timeout === "object" ? timeout : undefined
+          );
+        }
+
+        return await corsHandler();
+      });
+    }
+
+    // Without rate limiting, apply other middleware
     // Apply logging middleware (if enabled)
     if (logging) {
       return await withLogging(request, async (requestId) => {
