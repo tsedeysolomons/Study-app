@@ -4,39 +4,55 @@ import type { APIResponse, QuizRequest, QuizResponse } from "@/lib/api-types";
 import { handleAPIError } from "@/lib/errors";
 import { AIServiceAdapter, OpenAIProvider, AnthropicProvider } from "@/lib/ai";
 import { TokenManager } from "@/lib/ai/token-manager";
+import { getCacheManager } from "@/lib/cache/cache-manager";
+import { getRateLimiter } from "@/lib/rate-limit/rate-limiter";
 import type { AIConfig } from "@/lib/ai/types";
 
 /**
  * AI Quiz Generation Endpoint
  * POST /api/v1/ai/generate-quiz
- * 
+ *
  * Generates quiz questions from input text
- * 
- * **Validates: Requirements 2.1, 2.2, 3.1, 3.2, 3.3**
+ * Includes caching and rate limiting
+ *
+ * **Validates: Requirements 2.1, 2.2, 3.1, 3.2, 3.3, 7.1, 7.5, 7.6**
  */
 
 // Zod schema for request validation
 const QuizRequestSchema = z.object({
-  text: z.string().min(100, "Text must be at least 100 characters to generate quiz questions").max(50000, "Text is too long"),
-  options: z.object({
-    questionCount: z.number().int().min(3).max(5).optional(),
-    difficulty: z.enum(["easy", "medium", "hard"]).optional(),
-    temperature: z.number().min(0).max(1).optional(),
-  }).optional(),
+  text: z
+    .string()
+    .min(100, "Text must be at least 100 characters to generate quiz questions")
+    .max(50000, "Text is too long"),
+  options: z
+    .object({
+      questionCount: z.number().int().min(3).max(5).optional(),
+      difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+      temperature: z.number().min(0).max(1).optional(),
+    })
+    .optional(),
 });
 
 /**
  * Initialize AI service adapter with environment configuration
  */
-function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: TokenManager } {
+function initializeAIService(): {
+  adapter: AIServiceAdapter;
+  tokenManager: TokenManager;
+} {
   // Get configuration from environment variables
-  const provider = process.env.AI_PROVIDER as "openai" | "anthropic" | undefined;
+  const provider = process.env.AI_PROVIDER as
+    | "openai"
+    | "anthropic"
+    | undefined;
   const apiKey = process.env.AI_API_KEY;
   const model = process.env.AI_MODEL;
 
   // Validate required configuration
   if (!provider || !apiKey || !model) {
-    throw new Error("AI service not configured. Missing AI_PROVIDER, AI_API_KEY, or AI_MODEL environment variables.");
+    throw new Error(
+      "AI service not configured. Missing AI_PROVIDER, AI_API_KEY, or AI_MODEL environment variables.",
+    );
   }
 
   // Create AI configuration
@@ -54,9 +70,10 @@ function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: Token
   };
 
   // Initialize provider
-  const providerInstance = provider === "openai" 
-    ? new OpenAIProvider(config)
-    : new AnthropicProvider(config);
+  const providerInstance =
+    provider === "openai"
+      ? new OpenAIProvider(config)
+      : new AnthropicProvider(config);
 
   // Initialize adapter
   const adapter = new AIServiceAdapter(providerInstance, config);
@@ -65,8 +82,8 @@ function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: Token
   const tokenManager = new TokenManager({
     maxInputTokens: config.maxInputTokens,
     maxOutputTokens: config.maxOutputTokens,
-    dailyBudget: process.env.AI_DAILY_TOKEN_BUDGET 
-      ? parseInt(process.env.AI_DAILY_TOKEN_BUDGET, 10) 
+    dailyBudget: process.env.AI_DAILY_TOKEN_BUDGET
+      ? parseInt(process.env.AI_DAILY_TOKEN_BUDGET, 10)
       : undefined,
   });
 
@@ -75,9 +92,45 @@ function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: Token
 
 export async function POST(request: NextRequest) {
   try {
+    // Check rate limit
+    const clientId = request.headers.get("x-forwarded-for") || "anonymous";
+    const rateLimiter = getRateLimiter();
+    const rateLimitResult = rateLimiter.checkLimit(clientId);
+
+    if (!rateLimitResult.allowed) {
+      const response: APIResponse = {
+        success: false,
+        error: {
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "Too many requests",
+          retryAfter: rateLimitResult.retryAfter,
+        },
+      };
+      return NextResponse.json(response, { status: 429 });
+    }
+
     // Parse and validate request body
     const body = await request.json();
     const validatedData = QuizRequestSchema.parse(body);
+
+    // Check cache first
+    const cache = getCacheManager();
+    const cacheKey = `quiz:${validatedData.text.substring(0, 100)}:${JSON.stringify(validatedData.options || {})}`;
+    const cachedResult = cache.get<QuizResponse>(cacheKey);
+
+    if (cachedResult) {
+      const response: APIResponse<QuizResponse> = {
+        success: true,
+        data: {
+          ...cachedResult,
+          metadata: {
+            ...cachedResult.metadata,
+            cached: true,
+          },
+        },
+      };
+      return NextResponse.json(response, { status: 200 });
+    }
 
     // Initialize AI service
     const { adapter, tokenManager } = initializeAIService();
@@ -86,13 +139,19 @@ export async function POST(request: NextRequest) {
     tokenManager.validateRequest(validatedData.text, "quiz");
 
     // Generate quiz
-    const result = await adapter.generateQuiz(validatedData.text, validatedData.options);
+    const result = await adapter.generateQuiz(
+      validatedData.text,
+      validatedData.options,
+    );
 
     // Track token usage
     tokenManager.trackUsage(
       result.metadata.inputTokens,
-      result.metadata.outputTokens
+      result.metadata.outputTokens,
     );
+
+    // Cache the result for 24 hours
+    cache.set(cacheKey, result, 86400);
 
     // Return success response
     const response: APIResponse<QuizResponse> = {
@@ -101,7 +160,6 @@ export async function POST(request: NextRequest) {
     };
 
     return NextResponse.json(response, { status: 200 });
-
   } catch (error) {
     // Handle validation errors
     if (error instanceof z.ZodError) {
@@ -110,7 +168,7 @@ export async function POST(request: NextRequest) {
         error: {
           code: "INVALID_INPUT",
           message: "Request validation failed",
-          details: error.errors.map(e => ({
+          details: error.errors.map((e) => ({
             field: e.path.join("."),
             message: e.message,
           })),
