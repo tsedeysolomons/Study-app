@@ -13,7 +13,8 @@ import { getCacheManager } from "@/lib/cache/cache-manager";
 import type { StudySession as StorageSession } from "@/lib/storage/types";
 
 /**
- * Study Sessions Endpoint
+ * Study Sessions API Endpoints
+ * GET /api/v1/sessions - Retrieve study sessions
  * POST /api/v1/sessions - Create a new study session
  * GET /api/v1/sessions - Retrieve study sessions
  *
@@ -109,7 +110,11 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
+/**
+ * POST /api/v1/sessions
+ * Create a new study session
+ */
+export async function POST(request: NextRequest) {
   try {
     const clientId = request.headers.get("x-forwarded-for") || "anonymous";
 

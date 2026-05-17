@@ -95,7 +95,11 @@ export async function POST(request: NextRequest) {
   }
 }
 
-export async function GET(request: NextRequest) {
+/**
+ * POST /api/v1/notes
+ * Save or update notes
+ */
+export async function POST(request: NextRequest) {
   try {
     const clientId = request.headers.get("x-forwarded-for") || "anonymous";
     const rateLimiter = getRateLimiter();

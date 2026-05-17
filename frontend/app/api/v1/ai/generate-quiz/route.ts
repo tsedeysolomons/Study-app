@@ -4,8 +4,6 @@ import type { APIResponse, QuizRequest, QuizResponse } from "@/lib/api-types";
 import { handleAPIError } from "@/lib/errors";
 import { AIServiceAdapter, OpenAIProvider, AnthropicProvider } from "@/lib/ai";
 import { TokenManager } from "@/lib/ai/token-manager";
-import { getCacheManager } from "@/lib/cache/cache-manager";
-import { getRateLimiter } from "@/lib/rate-limit/rate-limiter";
 import type { AIConfig } from "@/lib/ai/types";
 
 /**
@@ -36,10 +34,7 @@ const QuizRequestSchema = z.object({
 /**
  * Initialize AI service adapter with environment configuration
  */
-function initializeAIService(): {
-  adapter: AIServiceAdapter;
-  tokenManager: TokenManager;
-} {
+function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: TokenManager } {
   // Get configuration from environment variables
   const provider = process.env.AI_PROVIDER as
     | "openai"
@@ -87,7 +82,14 @@ function initializeAIService(): {
       : undefined,
   });
 
-  return { adapter, tokenManager };
+  // Initialize cache manager
+  const cacheManager = new CacheManager({
+    enabled: process.env.CACHE_ENABLED !== "false",
+    ttl: parseInt(process.env.CACHE_TTL || "86400", 10),
+    maxEntries: parseInt(process.env.CACHE_MAX_ENTRIES || "1000", 10),
+  });
+
+  return { adapter, tokenManager, cacheManager };
 }
 
 export async function POST(request: NextRequest) {
@@ -133,7 +135,29 @@ export async function POST(request: NextRequest) {
     }
 
     // Initialize AI service
-    const { adapter, tokenManager } = initializeAIService();
+    const { adapter, tokenManager, cacheManager } = initializeAIService();
+
+    // Generate cache key
+    const cacheKey = cacheManager.generateKey("quiz", {
+      text: validatedData.text,
+      options: validatedData.options
+    });
+
+    // Check cache first
+    const cachedResult = await cacheManager.get<QuizResponse>(cacheKey);
+    if (cachedResult) {
+      const response: APIResponse<QuizResponse> = {
+        success: true,
+        data: {
+          ...cachedResult,
+          metadata: {
+            ...cachedResult.metadata,
+            cached: true
+          }
+        },
+      };
+      return NextResponse.json(response, { status: 200 });
+    }
 
     // Validate token budget
     tokenManager.validateRequest(validatedData.text, "quiz");
@@ -150,13 +174,16 @@ export async function POST(request: NextRequest) {
       result.metadata.outputTokens,
     );
 
-    // Cache the result for 24 hours
-    cache.set(cacheKey, result, 86400);
-
     // Return success response
     const response: APIResponse<QuizResponse> = {
       success: true,
-      data: result,
+      data: {
+        ...result,
+        metadata: {
+          ...result.metadata,
+          cached: false
+        }
+      },
     };
 
     return NextResponse.json(response, { status: 200 });
