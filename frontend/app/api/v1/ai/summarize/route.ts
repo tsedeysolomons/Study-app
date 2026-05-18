@@ -8,7 +8,7 @@ import type {
 import { handleAPIError } from "@/lib/errors";
 import { AIServiceAdapter, OpenAIProvider, AnthropicProvider } from "@/lib/ai";
 import { TokenManager } from "@/lib/ai/token-manager";
-import { getCacheManager } from "@/lib/cache/cache-manager";
+import { CacheManager, getCacheManager } from "@/lib/cache/cache-manager";
 import { getRateLimiter } from "@/lib/rate-limit/rate-limiter";
 import type { AIConfig } from "@/lib/ai/types";
 
@@ -42,6 +42,7 @@ const SummarizeRequestSchema = z.object({
 function initializeAIService(): {
   adapter: AIServiceAdapter;
   tokenManager: TokenManager;
+  cacheManager: CacheManager;
 } {
   // Get configuration from environment variables
   const provider = process.env.AI_PROVIDER as
@@ -123,32 +124,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const validatedData = SummarizeRequestSchema.parse(body);
 
-    // Check cache first
-    const cache = getCacheManager();
-    const cacheKey = `summarize:${validatedData.text.substring(0, 100)}:${JSON.stringify(validatedData.options || {})}`;
-    const cachedResult = cache.get<SummarizeResponse>(cacheKey);
-
-    if (cachedResult) {
-      const response: APIResponse<SummarizeResponse> = {
-        success: true,
-        data: {
-          ...cachedResult,
-          metadata: {
-            ...cachedResult.metadata,
-            cached: true,
-          },
-        },
-      };
-      return NextResponse.json(response, { status: 200 });
-    }
-
-    // Initialize AI service
+    // Initialize AI service and cache
     const { adapter, tokenManager, cacheManager } = initializeAIService();
 
     // Generate cache key
     const cacheKey = cacheManager.generateKey("summary", {
       text: validatedData.text,
-      options: validatedData.options
+      options: validatedData.options,
     });
 
     // Check cache first
@@ -160,8 +142,8 @@ export async function POST(request: NextRequest) {
           ...cachedResult,
           metadata: {
             ...cachedResult.metadata,
-            cached: true
-          }
+            cached: true,
+          },
         },
       };
       return NextResponse.json(response, { status: 200 });
@@ -182,8 +164,8 @@ export async function POST(request: NextRequest) {
       result.metadata.outputTokens,
     );
 
-    // Cache the result for 24 hours
-    cache.set(cacheKey, result, 86400);
+    // Cache the result
+    await cacheManager.set(cacheKey, result);
 
     // Return success response
     const response: APIResponse<SummarizeResponse> = {
@@ -192,8 +174,8 @@ export async function POST(request: NextRequest) {
         ...result,
         metadata: {
           ...result.metadata,
-          cached: false
-        }
+          cached: false,
+        },
       },
     };
 
