@@ -1,24 +1,24 @@
 /**
- * Rate Limiter
- * 
- * Implements sliding window rate limiting per user/IP.
- * Requirements: 6.1, 6.2, 6.6, 6.7
+ * Rate Limit Bucket for tracking requests per time window
  */
-
-export interface RateLimitConfig {
-  enabled: boolean;
-  requestsPerHour: number;
-  windowSize: number; // milliseconds
-}
-
-export interface RateLimitInfo {
-  identifier: string;
+export interface RateLimitBucket {
+  identifier: string; // user ID or IP address
   requestCount: number;
-  windowStart: number;
-  windowEnd: number;
-  requests: number[]; // timestamps
+  windowStart: number; // timestamp
+  resetAt: number; // timestamp
 }
 
+/**
+ * Rate Limiter Configuration
+ */
+export interface RateLimiterConfig {
+  requestsPerHour: number;
+  windowDuration: number; // milliseconds (default 3600000 = 1 hour)
+}
+
+/**
+ * Rate Limit Result
+ */
 export interface RateLimitResult {
   allowed: boolean;
   remaining: number;
@@ -26,156 +26,181 @@ export interface RateLimitResult {
   retryAfter?: number; // seconds
 }
 
+/**
+ * In-memory rate limiter with sliding window algorithm
+ * Tracks per-user or per-IP request quotas
+ * **Validates: Requirements 6.1, 6.2, 6.6, 6.7**
+ */
 export class RateLimiter {
-  private limits: Map<string, RateLimitInfo>;
-  private config: RateLimitConfig;
+  private buckets: Map<string, RateLimitBucket> = new Map();
 
-  constructor(config: RateLimitConfig) {
-    this.config = config;
-    this.limits = new Map();
-    
-    // Start cleanup interval
-    this.startCleanup();
-  }
+  constructor(private config: RateLimiterConfig) {}
 
   /**
-   * Check if request is allowed for identifier
+   * Check if request is allowed under rate limit
+   * Uses sliding window algorithm
+   * **Validates: 6.1, 6.2, 15.8**
    */
-  async checkLimit(identifier: string): Promise<RateLimitResult> {
-    if (!this.config.enabled) {
+  checkLimit(identifier: string): RateLimitResult {
+    const now = Date.now();
+    let bucket = this.buckets.get(identifier);
+
+    // Create new bucket if doesn't exist
+    if (!bucket) {
+      bucket = {
+        identifier,
+        requestCount: 1,
+        windowStart: now,
+        resetAt: now + this.config.windowDuration,
+      };
+      this.buckets.set(identifier, bucket);
       return {
         allowed: true,
-        remaining: this.config.requestsPerHour,
-        resetAt: Date.now() + this.config.windowSize
+        remaining: this.config.requestsPerHour - 1,
+        resetAt: bucket.resetAt,
       };
     }
 
-    const now = Date.now();
-    let info = this.limits.get(identifier);
-
-    // Initialize if not exists
-    if (!info) {
-      info = {
-        identifier,
-        requestCount: 0,
-        windowStart: now,
-        windowEnd: now + this.config.windowSize,
-        requests: []
+    // Reset bucket if window has expired
+    if (now >= bucket.resetAt) {
+      bucket.requestCount = 1;
+      bucket.windowStart = now;
+      bucket.resetAt = now + this.config.windowDuration;
+      this.buckets.set(identifier, bucket);
+      return {
+        allowed: true,
+        remaining: this.config.requestsPerHour - 1,
+        resetAt: bucket.resetAt,
       };
-      this.limits.set(identifier, info);
     }
-
-    // Clean up old requests outside the sliding window
-    const windowStart = now - this.config.windowSize;
-    info.requests = info.requests.filter(timestamp => timestamp > windowStart);
-    info.requestCount = info.requests.length;
 
     // Check if limit exceeded
-    if (info.requestCount >= this.config.requestsPerHour) {
-      const oldestRequest = info.requests[0];
-      const resetAt = oldestRequest + this.config.windowSize;
-      const retryAfter = Math.ceil((resetAt - now) / 1000);
-
+    if (bucket.requestCount >= this.config.requestsPerHour) {
+      const retryAfter = Math.ceil((bucket.resetAt - now) / 1000);
       return {
         allowed: false,
         remaining: 0,
-        resetAt,
-        retryAfter
+        resetAt: bucket.resetAt,
+        retryAfter,
       };
     }
 
-    // Allow request
-    info.requests.push(now);
-    info.requestCount++;
-    info.windowEnd = now + this.config.windowSize;
+    // Increment counter
+    bucket.requestCount++;
+    const remaining = this.config.requestsPerHour - bucket.requestCount;
 
     return {
       allowed: true,
-      remaining: this.config.requestsPerHour - info.requestCount,
-      resetAt: info.windowEnd
+      remaining,
+      resetAt: bucket.resetAt,
     };
   }
 
   /**
-   * Record a request for identifier
+   * Get current quota status without incrementing counter
    */
-  async recordRequest(identifier: string): Promise<void> {
-    const result = await this.checkLimit(identifier);
-    if (!result.allowed) {
-      throw new Error('Rate limit exceeded');
-    }
-  }
-
-  /**
-   * Get current limit info for identifier
-   */
-  async getLimitInfo(identifier: string): Promise<RateLimitInfo | null> {
-    return this.limits.get(identifier) || null;
-  }
-
-  /**
-   * Reset limit for identifier
-   */
-  async resetLimit(identifier: string): Promise<void> {
-    this.limits.delete(identifier);
-  }
-
-  /**
-   * Get remaining requests for identifier
-   */
-  async getRemaining(identifier: string): Promise<number> {
-    const result = await this.checkLimit(identifier);
-    return result.remaining;
-  }
-
-  /**
-   * Check if identifier is currently limited
-   */
-  async isLimited(identifier: string): Promise<boolean> {
-    const result = await this.checkLimit(identifier);
-    return !result.allowed;
-  }
-
-  /**
-   * Clean up expired entries
-   */
-  private cleanup(): void {
+  getStatus(identifier: string): RateLimitResult {
     const now = Date.now();
-    
-    for (const [identifier, info] of this.limits.entries()) {
-      // Remove if window has expired and no recent requests
-      if (info.windowEnd < now && info.requests.length === 0) {
-        this.limits.delete(identifier);
+    const bucket = this.buckets.get(identifier);
+
+    if (!bucket || now >= bucket.resetAt) {
+      return {
+        allowed: true,
+        remaining: this.config.requestsPerHour,
+        resetAt: now + this.config.windowDuration,
+      };
+    }
+
+    const remaining = Math.max(
+      0,
+      this.config.requestsPerHour - bucket.requestCount,
+    );
+
+    return {
+      allowed: remaining > 0,
+      remaining,
+      resetAt: bucket.resetAt,
+    };
+  }
+
+  /**
+   * Reset quota for specific identifier
+   */
+  reset(identifier: string): void {
+    this.buckets.delete(identifier);
+  }
+
+  /**
+   * Clear all rate limit data
+   */
+  clear(): void {
+    this.buckets.clear();
+  }
+
+  /**
+   * Get all active buckets (for monitoring/debugging)
+   */
+  getBuckets(): RateLimitBucket[] {
+    return Array.from(this.buckets.values());
+  }
+
+  /**
+   * Clean up expired buckets
+   * **Validates: 6.7**
+   */
+  cleanup(): void {
+    const now = Date.now();
+    for (const [identifier, bucket] of this.buckets.entries()) {
+      if (now >= bucket.resetAt) {
+        this.buckets.delete(identifier);
       }
     }
   }
 
   /**
-   * Start periodic cleanup
+   * Get metrics for all tracked identifiers
    */
-  private startCleanup(): void {
-    // Clean up every 5 minutes
-    setInterval(() => {
-      this.cleanup();
-    }, 5 * 60 * 1000);
-  }
+  getMetrics(): {
+    totalIdentifiers: number;
+    activeBuckets: number;
+    averageRequestsPerBucket: number;
+  } {
+    this.cleanup();
+    const buckets = this.buckets.size;
+    const totalRequests = Array.from(this.buckets.values()).reduce(
+      (sum, b) => sum + b.requestCount,
+      0,
+    );
 
-  /**
-   * Get statistics
-   */
-  getStats() {
     return {
-      totalIdentifiers: this.limits.size,
-      enabled: this.config.enabled,
-      requestsPerHour: this.config.requestsPerHour,
-      windowSize: this.config.windowSize
+      totalIdentifiers: buckets,
+      activeBuckets: buckets,
+      averageRequestsPerBucket: buckets > 0 ? totalRequests / buckets : 0,
     };
   }
+}
 
-  /**
-   * Clear all limits
-   */
-  async clear(): Promise<void> {
-    this.limits.clear();
+// Global rate limiter instance
+let rateLimiterInstance: RateLimiter | null = null;
+
+/**
+ * Get or create global rate limiter instance
+ */
+export function getRateLimiter(config?: RateLimiterConfig): RateLimiter {
+  if (!rateLimiterInstance) {
+    rateLimiterInstance = new RateLimiter(
+      config || {
+        requestsPerHour: 20,
+        windowDuration: 3600000, // 1 hour
+      },
+    );
   }
+  return rateLimiterInstance;
+}
+
+/**
+ * Reset rate limiter instance (for testing)
+ */
+export function resetRateLimiterInstance(): void {
+  rateLimiterInstance = null;
 }

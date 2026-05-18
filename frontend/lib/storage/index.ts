@@ -1,20 +1,49 @@
-/**
- * Storage module exports
- */
-
-export * from './types';
-export * from './memory-storage-adapter';
-
-import { MemoryStorageAdapter } from './memory-storage-adapter';
-import type { StorageAdapter } from './types';
+import { InMemoryStorageAdapter } from "./in-memory-adapter";
+import { PostgreSQLStorageAdapter } from "./postgresql-adapter";
+import type { IStorageAdapter } from "./types";
 
 /**
- * Get storage adapter instance based on configuration
+ * Storage factory for creating appropriate storage adapter
+ * based on configuration
  */
-export function getStorageAdapter(): StorageAdapter {
-  const storageMode = process.env.STORAGE_MODE || 'localStorage';
+export class StorageFactory {
+  static async createAdapter(): Promise<IStorageAdapter> {
+    const storageMode = process.env.STORAGE_MODE || "localStorage";
+    const databaseUrl = process.env.DATABASE_URL;
 
-  // For now, always use memory storage adapter
-  // Database adapter can be implemented later
-  return new MemoryStorageAdapter();
+    if (storageMode === "database") {
+      if (!databaseUrl) {
+        throw new Error(
+          "DATABASE_URL environment variable is required when STORAGE_MODE=database",
+        );
+      }
+
+      const adapter = new PostgreSQLStorageAdapter(databaseUrl);
+      await adapter.initialize();
+      return adapter;
+    }
+
+    // Default to in-memory storage for development
+    return new InMemoryStorageAdapter();
+  }
+}
+
+// Global storage adapter instance
+let storageInstance: IStorageAdapter | null = null;
+
+/**
+ * Get or create global storage adapter instance
+ */
+export async function getStorageAdapter(): Promise<IStorageAdapter> {
+  if (!storageInstance) {
+    storageInstance = await StorageFactory.createAdapter();
+  }
+  return storageInstance;
+}
+
+/**
+ * Reset storage instance (for testing)
+ */
+export function resetStorageInstance(): void {
+  storageInstance = null;
 }

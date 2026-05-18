@@ -1,42 +1,62 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import type { APIResponse, SummarizeRequest, SummarizeResponse } from "@/lib/api-types";
+import type {
+  APIResponse,
+  SummarizeRequest,
+  SummarizeResponse,
+} from "@/lib/api-types";
 import { handleAPIError } from "@/lib/errors";
 import { AIServiceAdapter, OpenAIProvider, AnthropicProvider } from "@/lib/ai";
 import { TokenManager } from "@/lib/ai/token-manager";
-import { CacheManager } from "@/lib/cache/cache-manager";
+import { CacheManager, getCacheManager } from "@/lib/cache/cache-manager";
+import { getRateLimiter } from "@/lib/rate-limit/rate-limiter";
 import type { AIConfig } from "@/lib/ai/types";
 
 /**
  * AI Text Summarization Endpoint
  * POST /api/v1/ai/summarize
- * 
+ *
  * Generates a summary and key points from input text
- * 
- * **Validates: Requirements 2.1, 2.2, 3.1, 3.2, 3.3**
+ * Includes caching and rate limiting
+ *
+ * **Validates: Requirements 2.1, 2.2, 3.1, 3.2, 3.3, 7.1, 7.5, 7.6**
  */
 
 // Zod schema for request validation
 const SummarizeRequestSchema = z.object({
-  text: z.string().min(1, "Text cannot be empty").max(50000, "Text is too long"),
-  options: z.object({
-    maxKeyPoints: z.number().int().min(3).max(7).optional(),
-    temperature: z.number().min(0).max(1).optional(),
-  }).optional(),
+  text: z
+    .string()
+    .min(1, "Text cannot be empty")
+    .max(50000, "Text is too long"),
+  options: z
+    .object({
+      maxKeyPoints: z.number().int().min(3).max(7).optional(),
+      temperature: z.number().min(0).max(1).optional(),
+    })
+    .optional(),
 });
 
 /**
  * Initialize AI service adapter with environment configuration
  */
-function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: TokenManager; cacheManager: CacheManager } {
+function initializeAIService(): {
+  adapter: AIServiceAdapter;
+  tokenManager: TokenManager;
+  cacheManager: CacheManager;
+} {
   // Get configuration from environment variables
-  const provider = process.env.AI_PROVIDER as "openai" | "anthropic" | undefined;
+  const provider = process.env.AI_PROVIDER as
+    | "openai"
+    | "anthropic"
+    | undefined;
   const apiKey = process.env.AI_API_KEY;
   const model = process.env.AI_MODEL;
 
   // Validate required configuration
   if (!provider || !apiKey || !model) {
-    throw new Error("AI service not configured. Missing AI_PROVIDER, AI_API_KEY, or AI_MODEL environment variables.");
+    throw new Error(
+      "AI service not configured. Missing AI_PROVIDER, AI_API_KEY, or AI_MODEL environment variables.",
+    );
   }
 
   // Create AI configuration
@@ -54,9 +74,10 @@ function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: Token
   };
 
   // Initialize provider
-  const providerInstance = provider === "openai" 
-    ? new OpenAIProvider(config)
-    : new AnthropicProvider(config);
+  const providerInstance =
+    provider === "openai"
+      ? new OpenAIProvider(config)
+      : new AnthropicProvider(config);
 
   // Initialize adapter
   const adapter = new AIServiceAdapter(providerInstance, config);
@@ -65,8 +86,8 @@ function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: Token
   const tokenManager = new TokenManager({
     maxInputTokens: config.maxInputTokens,
     maxOutputTokens: config.maxOutputTokens,
-    dailyBudget: process.env.AI_DAILY_TOKEN_BUDGET 
-      ? parseInt(process.env.AI_DAILY_TOKEN_BUDGET, 10) 
+    dailyBudget: process.env.AI_DAILY_TOKEN_BUDGET
+      ? parseInt(process.env.AI_DAILY_TOKEN_BUDGET, 10)
       : undefined,
   });
 
@@ -82,17 +103,34 @@ function initializeAIService(): { adapter: AIServiceAdapter; tokenManager: Token
 
 export async function POST(request: NextRequest) {
   try {
+    // Check rate limit
+    const clientId = request.headers.get("x-forwarded-for") || "anonymous";
+    const rateLimiter = getRateLimiter();
+    const rateLimitResult = rateLimiter.checkLimit(clientId);
+
+    if (!rateLimitResult.allowed) {
+      const response: APIResponse = {
+        success: false,
+        error: {
+          code: "RATE_LIMIT_EXCEEDED",
+          message: "Too many requests",
+          retryAfter: rateLimitResult.retryAfter,
+        },
+      };
+      return NextResponse.json(response, { status: 429 });
+    }
+
     // Parse and validate request body
     const body = await request.json();
     const validatedData = SummarizeRequestSchema.parse(body);
 
-    // Initialize AI service
+    // Initialize AI service and cache
     const { adapter, tokenManager, cacheManager } = initializeAIService();
 
     // Generate cache key
     const cacheKey = cacheManager.generateKey("summary", {
       text: validatedData.text,
-      options: validatedData.options
+      options: validatedData.options,
     });
 
     // Check cache first
@@ -104,8 +142,8 @@ export async function POST(request: NextRequest) {
           ...cachedResult,
           metadata: {
             ...cachedResult.metadata,
-            cached: true
-          }
+            cached: true,
+          },
         },
       };
       return NextResponse.json(response, { status: 200 });
@@ -115,15 +153,18 @@ export async function POST(request: NextRequest) {
     tokenManager.validateRequest(validatedData.text, "summary");
 
     // Generate summary
-    const result = await adapter.summarize(validatedData.text, validatedData.options);
+    const result = await adapter.summarize(
+      validatedData.text,
+      validatedData.options,
+    );
 
     // Track token usage
     tokenManager.trackUsage(
       result.metadata.inputTokens,
-      result.metadata.outputTokens
+      result.metadata.outputTokens,
     );
 
-    // Store in cache
+    // Cache the result
     await cacheManager.set(cacheKey, result);
 
     // Return success response
@@ -133,13 +174,12 @@ export async function POST(request: NextRequest) {
         ...result,
         metadata: {
           ...result.metadata,
-          cached: false
-        }
+          cached: false,
+        },
       },
     };
 
     return NextResponse.json(response, { status: 200 });
-
   } catch (error) {
     // Handle validation errors
     if (error instanceof z.ZodError) {
@@ -148,7 +188,7 @@ export async function POST(request: NextRequest) {
         error: {
           code: "INVALID_INPUT",
           message: "Request validation failed",
-          details: error.errors.map(e => ({
+          details: error.errors.map((e) => ({
             field: e.path.join("."),
             message: e.message,
           })),
