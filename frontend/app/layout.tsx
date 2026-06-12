@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Smart AI Study Assistant",
   description:
-    "Your intelligent study companion - summarize notes, generate quizzes, and track your progress",
+    "Study Smarter with AI: Summarize Notes, Create Quizzes, and Monitor Your Learning Journey",
   generator: "v0.app",
   icons: {
     icon: [

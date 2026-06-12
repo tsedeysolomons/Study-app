@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
       success: false,
       error: {
         code: "SERVICE_UNAVAILABLE",
-        message: "Analytics summary service not yet implemented",
+        message: "Analytics summary service not yet implemented here",
       },
     };
 
